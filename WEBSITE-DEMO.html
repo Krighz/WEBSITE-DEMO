@@ -599,8 +599,6 @@
 
 <div class="grain"></div>
 
-<div class="admin-note">⚙ Placeholder content inside — swap the cafe name, photos &amp; copy for your own before publishing.</div>
-
 <header>
   <div class="wrap">
     <a href="#top" class="logo">Anurag'S Cafe <span>Est. Local</span></a>
@@ -774,7 +772,8 @@
         </div>
         <input type="text" id="reviewName" placeholder="Your name" required>
         <textarea id="reviewText" placeholder="Tell us about your visit..." required></textarea>
-        <button type="submit" class="btn btn-primary">Submit Review</button>
+        <input type="text" id="reviewWebsite" name="website" autocomplete="off" tabindex="-1" style="position:absolute; left:-9999px; opacity:0;" aria-hidden="true">
+        <button type="submit" class="btn btn-primary" id="reviewSubmitBtn">Submit Review</button>
         <div class="form-note" id="reviewNote"></div>
       </form>
     </div>
@@ -833,7 +832,8 @@
         <form class="lead-form" id="leadForm">
           <input type="text" id="leadName" placeholder="First name" required>
           <input type="email" id="leadEmail" placeholder="Email address" required>
-          <button type="submit" class="btn btn-primary">Claim My 15% Off</button>
+          <input type="text" id="leadWebsite" name="website" autocomplete="off" tabindex="-1" style="position:absolute; left:-9999px; opacity:0;" aria-hidden="true">
+          <button type="submit" class="btn btn-primary" id="leadSubmitBtn">Claim My 15% Off</button>
         </form>
         <div class="lead-success" id="leadSuccess">✓ You're in — check your inbox for your code.</div>
       </div>
@@ -986,45 +986,103 @@
     });
   });
 
-  // Review form — stores in-memory + renders a new card (no backend; this is a static single-file site)
+  // ===== Backend connection (Google Apps Script) =====
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzkLHPXy2FMSRVZocffzkSO7gYvV8KpArURKPlD4wKkkdErhEZvttPllsdj5r0TjopC/exec";
+
+  // Review form — sends to Apps Script (saves to Sheet + emails you), then shows the new card
   const reviewForm = document.getElementById('reviewForm');
   const reviewGrid = document.getElementById('reviewGrid');
   const reviewNote = document.getElementById('reviewNote');
+  const reviewSubmitBtn = document.getElementById('reviewSubmitBtn');
   reviewForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const name = document.getElementById('reviewName').value.trim();
     const text = document.getElementById('reviewText').value.trim();
+    const honeypot = document.getElementById('reviewWebsite').value;
+
+    if(honeypot){
+      // Silently drop likely bot submissions — no error shown, no request sent
+      reviewForm.reset();
+      return;
+    }
     if(!name || !text || selectedStars === 0){
       reviewNote.style.color = '#A8542E';
       reviewNote.textContent = selectedStars === 0 ? 'Please select a star rating.' : 'Please fill in all fields.';
       return;
     }
-    const card = document.createElement('div');
-    card.className = 'review-card reveal in';
-    const initials = name.trim().charAt(0).toUpperCase();
-    card.innerHTML = `
-      <div class="stars">${'★'.repeat(selectedStars)}${'☆'.repeat(5-selectedStars)}</div>
-      <p>"${text.replace(/</g,'&lt;')}"</p>
-      <div class="review-who">
-        <div class="review-avatar">${initials}</div>
-        <div><strong>${name.replace(/</g,'&lt;')}</strong><span>Just now</span></div>
-      </div>`;
-    reviewGrid.prepend(card);
-    reviewForm.reset();
-    starSpans.forEach(s => s.classList.remove('active'));
-    selectedStars = 0;
+
+    reviewSubmitBtn.disabled = true;
+    reviewSubmitBtn.textContent = 'Submitting...';
     reviewNote.style.color = '#5C7A52';
-    reviewNote.textContent = '✓ Thank you! Your review has been posted.';
-    setTimeout(() => reviewNote.textContent = '', 4000);
+    reviewNote.textContent = '';
+
+    fetch(SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'}, // avoids a CORS preflight with Apps Script
+      body: JSON.stringify({ type: 'review', name: name, rating: selectedStars, text: text })
+    })
+    .then(() => {
+      const card = document.createElement('div');
+      card.className = 'review-card reveal in';
+      const initials = name.trim().charAt(0).toUpperCase();
+      card.innerHTML = `
+        <div class="stars">${'★'.repeat(selectedStars)}${'☆'.repeat(5-selectedStars)}</div>
+        <p>"${text.replace(/</g,'&lt;')}"</p>
+        <div class="review-who">
+          <div class="review-avatar">${initials}</div>
+          <div><strong>${name.replace(/</g,'&lt;')}</strong><span>Just now</span></div>
+        </div>`;
+      reviewGrid.prepend(card);
+      reviewForm.reset();
+      starSpans.forEach(s => s.classList.remove('active'));
+      selectedStars = 0;
+      reviewNote.style.color = '#5C7A52';
+      reviewNote.textContent = '✓ Thank you! Your review has been posted.';
+      setTimeout(() => reviewNote.textContent = '', 4000);
+    })
+    .catch(() => {
+      reviewNote.style.color = '#A8542E';
+      reviewNote.textContent = 'Something went wrong sending your review. Please try again.';
+    })
+    .finally(() => {
+      reviewSubmitBtn.disabled = false;
+      reviewSubmitBtn.textContent = 'Submit Review';
+    });
   });
 
-  // Lead capture form
+  // Lead capture form — sends to Apps Script (saves to Sheet + emails you)
   const leadForm = document.getElementById('leadForm');
   const leadSuccess = document.getElementById('leadSuccess');
+  const leadSubmitBtn = document.getElementById('leadSubmitBtn');
   leadForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    leadForm.style.display = 'none';
-    leadSuccess.classList.add('show');
+    const firstName = document.getElementById('leadName').value.trim();
+    const email = document.getElementById('leadEmail').value.trim();
+    const honeypot = document.getElementById('leadWebsite').value;
+
+    if(honeypot){
+      leadForm.reset();
+      return;
+    }
+    if(!firstName || !email) return;
+
+    leadSubmitBtn.disabled = true;
+    leadSubmitBtn.textContent = 'Submitting...';
+
+    fetch(SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({ type: 'lead', firstName: firstName, email: email })
+    })
+    .then(() => {
+      leadForm.style.display = 'none';
+      leadSuccess.classList.add('show');
+    })
+    .catch(() => {
+      leadSubmitBtn.disabled = false;
+      leadSubmitBtn.textContent = 'Claim My 15% Off';
+      alert('Something went wrong submitting your details. Please try again.');
+    });
   });
 </script>
 
